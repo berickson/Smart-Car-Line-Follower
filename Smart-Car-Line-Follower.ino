@@ -15,6 +15,8 @@ struct Options {
 
 float error=0, P=0, I=0, D=0, PID_value=0;
 float previous_error=0;
+float delta_error = 0; // last change in error
+float delta_t = 999;
 float previous_time=0;
 int sensor[5]={0, 0, 0, 0, 0};
 
@@ -312,13 +314,18 @@ void calculate_pid()
 {
     if (error!=previous_error)
     {
+      delta_t = micros()-previous_time;
+      delta_error = error-previous_error;
       P = error;
-      I = I + 1e-6*(error-previous_error)*(micros()-previous_time);
-      D = 1e6*(error-previous_error)/(micros()-previous_time);
+      I = I + 1e-6*(delta_error)*(delta_t);
+      D = 1e6*(error-previous_error)/(delta_t);
      previous_error=error;
      previous_time=micros();
-     PID_value = options.Kp*P + options.Ki*I + options.Kd*D; 
     }
+    if(micros()-previous_time > delta_t) {
+      D = 1e6*(delta_error) / (micros() -previous_time);
+    }
+    PID_value = options.Kp*P + options.Ki*I + options.Kd*D; 
 }
 
 void motor_control()
