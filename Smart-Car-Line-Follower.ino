@@ -1,13 +1,22 @@
+#include <EEPROM.h>
+
 #include <SoftwareSerial.h>
 
+const int options_magic_number = 32568;
+const int eeprom_address = 0;
+struct Options {
+  int magic = options_magic_number;
+  float Kp = 100;
+  float Ki = 0;
+  float Kd = 1.0;
+  int initial_motor_speed = 200;
+  int max_speed = 255;
+} options;
 
-float Kp=100,Ki=0,Kd=.24;
 float error=0, P=0, I=0, D=0, PID_value=0;
 float previous_error=0;
 float previous_time=0;
 int sensor[5]={0, 0, 0, 0, 0};
-int initial_motor_speed=100;
-int max_speed = 200;
 
 int left_motor_speed = 0;
 int right_motor_speed = 0;
@@ -57,9 +66,26 @@ void setup()
   usb.flush();
   usb.println("AT+NAMESmartCar");
   usb.flush();
+
+  read_options_from_eeprom();
   
  Serial.begin(115200);
 }
+
+bool read_options_from_eeprom() {
+  Options new_options;
+  EEPROM.get(eeprom_address, new_options);
+  if(new_options.magic == options_magic_number) {
+    options = new_options;
+    return true;
+  }
+  return false;
+}
+
+void write_options_to_eeprom() {
+  EEPROM.put(eeprom_address, options);
+}
+
 
 char command_buffer[80] = {0};
 int command_length = 0;
@@ -79,6 +105,20 @@ void execute_command(char * s) {
   
   usb.print("executing command ");
   usb.println(s);
+  if(s[0] == 'h') {
+      usb.println("h - help");
+      usb.println("g - go");
+      usb.println("s - stop");
+      usb.println("v{0-255} - set velocity");
+      usb.println("m{0-255} - set max velocity for turns");
+      usb.println("p{integer} - set Kp for PID");
+      usb.println("i{integer} - set Ki for PID x 0.01");
+      usb.println("d{integer} - set Kd for PID x 0.01");
+      usb.println("r - read options from eeprom");
+      usb.println("w - write options to eeprom");
+      usb.println("o - show currrent options");
+    
+  }
   if(s[0] == 'g') {
       go = true;
       usb.println("go");
@@ -88,24 +128,53 @@ void execute_command(char * s) {
       usb.println("stop\n");
   }
   if(s[0] == 'v') {
-    initial_motor_speed=atoi(s+1);
+    options.initial_motor_speed=atoi(s+1);
     usb.print("set initial_motor_speed to ");
-    usb.println(initial_motor_speed);
+    usb.println(options.initial_motor_speed);
   }
   if(s[0] == 'm') {
-    max_speed=atoi(s+1);
+    options.max_speed=atoi(s+1);
     usb.print("set max_speed to ");
-    usb.println(max_speed);
+    usb.println(options.max_speed);
   }
   if(s[0] == 'p') {
-    Kp=atoi(s+1);
+    options.Kp=atoi(s+1);
     usb.print("set Kp to ");
-    usb.println(Kp);
+    usb.println(options.Kp);
+  }
+  if(s[0] == 'i') {
+    options.Ki=atoi(s+1);
+    usb.print("set Ki to ");
+    usb.println(options.Kp);
   }
   if(s[0] == 'd') {
-    Kd=atoi(s+1)/100.;
+    options.Kd=atoi(s+1)/100.;
     usb.print("set Kd to ");
-    usb.println(Kd);
+    usb.println(options.Kd);
+  }
+  if(s[0] == 'r') {
+    if( read_options_from_eeprom() ) {
+      usb.println("loaded values from eeprom");
+    } else {
+      usb.println("eeprom options read failed");
+    }
+  }
+  if(s[0] == 'w') {
+    write_options_to_eeprom();
+    usb.println("options written to eeprom");
+  }
+  if(s[0] == 'o') {
+    usb.println("current option settings");
+    usb.print("Kp: ");
+    usb.println(options.Kp);
+    usb.print("Ki: ");
+    usb.println(options.Ki);
+    usb.print("Kd: ");
+    usb.println(options.Kd);
+    usb.print("initial_motor_speed: ");
+    usb.println(options.initial_motor_speed);
+    usb.print("max_speed: ");
+    usb.println(options.max_speed);
   }
   usb.flush();
 }
@@ -248,7 +317,7 @@ void calculate_pid()
       D = 1e6*(error-previous_error)/(micros()-previous_time);
      previous_error=error;
      previous_time=micros();
-     PID_value = Kp*P + Ki*I + Kd*D; 
+     PID_value = options.Kp*P + options.Ki*I + options.Kd*D; 
     }
 }
 
@@ -256,8 +325,8 @@ void motor_control()
 {
     if(go) {
       // Calculating the effective motor speed:
-      left_motor_speed = constrain(initial_motor_speed+PID_value, -max_speed,max_speed);
-      right_motor_speed = constrain(initial_motor_speed-PID_value, -max_speed,max_speed);
+      left_motor_speed = constrain(options.initial_motor_speed+PID_value, -options.max_speed, options.max_speed);
+      right_motor_speed = constrain(options.initial_motor_speed-PID_value, -options.max_speed, options.max_speed);
     } else {
       left_motor_speed = right_motor_speed = 0;
     }
