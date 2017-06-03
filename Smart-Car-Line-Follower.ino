@@ -1,5 +1,4 @@
 #include <EEPROM.h>
-
 #include <SoftwareSerial.h>
 
 const int options_magic_number = 32568;
@@ -9,7 +8,7 @@ struct Options {
   float Kp = 100;
   float Ki = 0;
   float Kd = 1.0;
-  int initial_motor_speed = 200;
+  int base_speed = 200;
   int max_speed = 255;
 } options;
 
@@ -89,20 +88,6 @@ void write_options_to_eeprom() {
 }
 
 
-char command_buffer[80] = {0};
-int command_length = 0;
-
-
-
-/*void trace(String s) {
-  return;
-  Serial.print(s);
-}
-void trace(int i) {
-  trace(String(i));
-}*/
-
-
 void execute_command(char * s) {
   
   usb.print("executing command ");
@@ -130,9 +115,9 @@ void execute_command(char * s) {
       usb.println("stop\n");
   }
   if(s[0] == 'v') {
-    options.initial_motor_speed=atoi(s+1);
-    usb.print("set initial_motor_speed to ");
-    usb.println(options.initial_motor_speed);
+    options.base_speed=atoi(s+1);
+    usb.print("set base_speed to ");
+    usb.println(options.base_speed);
   }
   if(s[0] == 'm') {
     options.max_speed=atoi(s+1);
@@ -173,16 +158,19 @@ void execute_command(char * s) {
     usb.println(options.Ki);
     usb.print("Kd: ");
     usb.println(options.Kd);
-    usb.print("initial_motor_speed: ");
-    usb.println(options.initial_motor_speed);
+    usb.print("base_speed: ");
+    usb.println(options.base_speed);
     usb.print("max_speed: ");
     usb.println(options.max_speed);
   }
   usb.flush();
 }
 
-void loop()
-{
+
+void process_commands() {
+  static char command_buffer[80] = {0};
+  static int command_length = 0;
+  
   if(usb.available()) {
     
     char c = usb.read();
@@ -196,36 +184,25 @@ void loop()
     }
     else {
       if(command_length > 30) {
+        command_buffer[0] = 0;
         command_length = 0;
       }
       command_buffer[command_length] = c;
       command_buffer[++command_length]=0;
     }
   }
-  
-  get_line_position();
-  //return;
-  //read_sensor_values();
-/*  trace("Sensors: ");
-  trace(sensor[0]);
-  trace(sensor[1]);
-  trace(sensor[2]);
-  trace(sensor[3]);
-  trace(sensor[4]);
-  trace("  Error: ");
-  trace(error);*/
-  calculate_pid();
-  motor_control();
-  /*trace(" Left: ");
-  trace(left_motor_speed);
-
-  trace(" Right: ");
-  trace(right_motor_speed);
-  trace("\n");*/
-    
 }
 
-int get_line_position() {
+void loop()
+{
+
+  process_commands();
+  get_line_position();
+  calculate_pid();
+  motor_control();
+}
+
+void get_line_position() {
   sensor[0]=digitalRead(A0);
   sensor[1]=digitalRead(A1);
   sensor[2]=digitalRead(A2);
@@ -247,35 +224,24 @@ int get_line_position() {
     }
   }
 
-  bool ok = true;
-
   // must have at least one line reading to be ok
   if(line_end == -1) {
-    ok = false;
+    return;
   }
   
   // reading must be contiguous block of sensors to be ok
-  if(ok) {
-    for(int i = line_start; i < line_end; i++) {
-      if(sensor[i]==false) {
-        ok = false;
-      }
+  for(int i = line_start; i < line_end; i++) {
+    if(sensor[i]==false) {
+      return;
     }
   }
 
   // can't be all black
-  if(ok) {
-    if( line_start == 0 && line_end == max_sensor) {
-      ok = false;
-    }
+  if( line_start == 0 && line_end == max_sensor) {
+    return;
   }
 
-  if(ok) {
-    error = line_end + line_start  - 4;
-  }
-  //Serial.println(error);
-  
-  
+  error = line_end + line_start  - 4;
 }
 
 void read_sensor_values()
@@ -304,10 +270,6 @@ void read_sensor_values()
     error=-3;
   else if((sensor[0]==1)&&(sensor[1]==0)&&(sensor[2]==0)&&(sensor[3]==0)&&(sensor[4]==0))
     error=-4;
-  //else if((sensor[0]==0)&&(sensor[1]==0)&&(sensor[2]==0)&&(sensor[3]==0)&&(sensor[4]==0))
-  //  if(error==-4) error=-5;
-  //  else error=5;
-
 }
 
 void calculate_pid()
@@ -322,6 +284,9 @@ void calculate_pid()
      previous_error=error;
      previous_time=micros();
     }
+
+
+    // allow D term to settle if error hasn't changed recently
     if(micros()-previous_time > delta_t) {
       D = 1e6*(delta_error) / (micros() -previous_time);
     }
@@ -332,8 +297,8 @@ void motor_control()
 {
     if(go) {
       // Calculating the effective motor speed:
-      left_motor_speed = constrain(options.initial_motor_speed+PID_value, -options.max_speed, options.max_speed);
-      right_motor_speed = constrain(options.initial_motor_speed-PID_value, -options.max_speed, options.max_speed);
+      left_motor_speed = constrain(options.base_speed+PID_value, -options.max_speed, options.max_speed);
+      right_motor_speed = constrain(options.base_speed-PID_value, -options.max_speed, options.max_speed);
     } else {
       left_motor_speed = right_motor_speed = 0;
     }
